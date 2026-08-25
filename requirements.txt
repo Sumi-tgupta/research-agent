@@ -1,0 +1,38 @@
+# --- Web framework ---
+fastapi>=0.139.0
+uvicorn[standard]>=0.51.0
+
+# --- Config / validation ---
+pydantic>=2.13.0
+pydantic-settings>=2.14.0
+python-dotenv>=1.2.0
+
+# --- Retrieval agents ---
+tavily-python>=0.7.26      # web search (Search Agent)
+arxiv>=4.0.0                # ArXiv API (Paper Retrieval Agent)
+requests>=2.33.0            # Semantic Scholar API (Paper Retrieval Agent)
+
+# --- LLMs (free-tier keys) ---
+google-genai>=2.12.0        # Gemini
+groq>=1.5.0                 # Groq
+
+# --- Orchestration (wired starting Phase 2) ---
+langgraph>=1.2.9
+
+# --- Local vector store (Phase 2) ---
+faiss-cpu>=1.14.0
+sentence-transformers>=5.6.0    # downloads model weights from huggingface.co on first use
+
+# --- Supplementary retrieval for the Writer (Phase 4) ---
+llama-index-core>=0.14.0
+llama-index-vector-stores-faiss>=0.6.0
+llama-index-embeddings-huggingface>=0.7.0   # shares the same kind of local model, no extra API key
+
+# --- Citations, PDF, and charts (Phase 5) ---
+reportlab>=4.4.0      # PDF generation — pure Python, no system libraries needed
+matplotlib>=3.10.0    # chart rendering to PNG
+
+# --- Testing ---
+pytest>=9.1.0
+pytest-mock>=3.15.0
+httpx2>=2.0.0   # what starlette.testclient/FastAPI's TestClient uses now (httpx itself is deprecated for this)

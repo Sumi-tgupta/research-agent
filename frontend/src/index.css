@@ -1,0 +1,573 @@
+/* ============================================================
+   Design tokens.
+
+   The palette is derived from the product's actual verdict states
+   (corroborated / single-source / contradicted) rather than picked
+   decoratively — the same three colors that mark a claim's confidence
+   in the Fact Checker also drive the "stamp" states in the live status
+   ledger below. Ink/paper/rule are the neutral scaffolding around them.
+   ============================================================ */
+:root {
+  --paper: #f6f5f1;
+  --paper-raised: #ffffff;
+  --ink: #181c22;
+  --ink-soft: #4b525c;
+  --rule: #d9d6cc;
+
+  --verified: #1f6f5c;
+  --verified-tint: #e3efec;
+  --caution: #a6742c;
+  --caution-tint: #f3ead9;
+  --alert: #a83a32;
+  --alert-tint: #f3e0dd;
+
+  --accent: #2b3a67;
+  --accent-tint: #e4e7ef;
+
+  --font-display: "IBM Plex Serif", Georgia, serif;
+  --font-body: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+
+  --radius-sm: 3px;
+  --radius-md: 6px;
+  --shadow-card: 0 1px 2px rgba(24, 28, 34, 0.06), 0 8px 24px rgba(24, 28, 34, 0.05);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 16px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1,
+h2,
+h3 {
+  font-family: var(--font-display);
+  font-weight: 600;
+  line-height: 1.25;
+  margin: 0;
+}
+
+a {
+  color: var(--accent);
+}
+
+button {
+  font-family: var(--font-body);
+}
+
+.app-shell {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 56px 24px 96px;
+}
+
+.masthead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 48px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--rule);
+}
+
+.masthead-mark {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+.masthead-mark strong {
+  color: var(--ink);
+}
+
+/* ============================================================
+   Query form
+   ============================================================ */
+.intro-heading {
+  font-size: 34px;
+  margin-bottom: 12px;
+  max-width: 15ch;
+}
+
+.intro-sub {
+  color: var(--ink-soft);
+  max-width: 52ch;
+  margin-bottom: 36px;
+}
+
+.query-form {
+  background: var(--paper-raised);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-md);
+  padding: 24px;
+  box-shadow: var(--shadow-card);
+}
+
+.query-textarea {
+  width: 100%;
+  font-family: var(--font-body);
+  font-size: 17px;
+  color: var(--ink);
+  border: none;
+  resize: vertical;
+  min-height: 84px;
+  outline: none;
+  background: transparent;
+}
+
+.query-textarea::placeholder {
+  color: #9a9d93;
+}
+
+.query-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--rule);
+}
+
+.option-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.option-label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+.option-select {
+  font-family: var(--font-body);
+  font-size: 14px;
+  color: var(--ink);
+  background: var(--paper);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
+}
+
+.form-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 20px;
+}
+
+.pipeline-preview {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: var(--ink-soft);
+}
+
+.submit-button {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--paper);
+  background: var(--ink);
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 12px 22px;
+  cursor: pointer;
+  transition: transform 0.15s ease, background 0.15s ease;
+}
+
+.submit-button:hover {
+  background: var(--accent);
+}
+
+.submit-button:active {
+  transform: translateY(1px);
+}
+
+.submit-button:disabled {
+  background: var(--rule);
+  color: var(--ink-soft);
+  cursor: not-allowed;
+}
+
+.error-banner {
+  margin-top: 16px;
+  padding: 12px 14px;
+  background: var(--alert-tint);
+  border: 1px solid var(--alert);
+  border-radius: var(--radius-sm);
+  color: var(--alert);
+  font-size: 14px;
+}
+
+/* ============================================================
+   Research log — the live pipeline status ledger.
+   Signature element: each stage reads like a numbered, timestamped
+   manuscript-review entry, closing with a hand-stamped status badge
+   that "lands" when the stage completes.
+   ============================================================ */
+.research-log {
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-md);
+  background: var(--paper-raised);
+  box-shadow: var(--shadow-card);
+  overflow: hidden;
+}
+
+.research-log-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 18px 20px;
+  border-bottom: 1px solid var(--rule);
+}
+
+.research-log-title {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+.research-log-query {
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-style: italic;
+  color: var(--ink);
+  max-width: 40ch;
+  text-align: right;
+}
+
+.log-entry {
+  display: grid;
+  grid-template-columns: 32px 1fr auto;
+  align-items: start;
+  gap: 14px;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--rule);
+}
+
+.log-entry:last-child {
+  border-bottom: none;
+}
+
+.log-entry.is-pending {
+  opacity: 0.45;
+}
+
+.log-index {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--ink-soft);
+  padding-top: 2px;
+}
+
+.log-body {
+  min-width: 0;
+}
+
+.log-label {
+  font-weight: 500;
+  margin-bottom: 2px;
+}
+
+.log-summary {
+  font-size: 14px;
+  color: var(--ink-soft);
+}
+
+.log-error {
+  font-size: 13px;
+  color: var(--alert);
+  margin-top: 4px;
+}
+
+/* the stamp */
+.log-stamp {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding: 5px 10px;
+  border-radius: var(--radius-sm);
+  border: 1.5px solid currentColor;
+  white-space: nowrap;
+  transform: rotate(-2deg);
+}
+
+.log-stamp.status-pending {
+  color: var(--ink-soft);
+  border-style: dashed;
+  opacity: 0.6;
+}
+
+.log-stamp.status-running {
+  color: var(--caution);
+  background: var(--caution-tint);
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
+.log-stamp.status-done {
+  color: var(--verified);
+  background: var(--verified-tint);
+  animation: stamp-land 0.35s cubic-bezier(0.2, 0.9, 0.3, 1.2);
+}
+
+.log-stamp.status-caution {
+  color: var(--caution);
+  background: var(--caution-tint);
+  animation: stamp-land 0.35s cubic-bezier(0.2, 0.9, 0.3, 1.2);
+}
+
+.log-stamp.status-error {
+  color: var(--alert);
+  background: var(--alert-tint);
+  animation: stamp-land 0.35s cubic-bezier(0.2, 0.9, 0.3, 1.2);
+}
+
+@keyframes stamp-land {
+  0% {
+    transform: rotate(-2deg) scale(1.6);
+    opacity: 0;
+  }
+  60% {
+    transform: rotate(-2deg) scale(0.94);
+    opacity: 1;
+  }
+  100% {
+    transform: rotate(-2deg) scale(1);
+  }
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+
+/* ============================================================
+   Report view
+   ============================================================ */
+.report-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 20px;
+}
+
+.text-link-button {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+  background: none;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-sm);
+  padding: 8px 14px;
+  cursor: pointer;
+}
+
+.text-link-button:hover {
+  border-color: var(--ink);
+  color: var(--ink);
+}
+
+.download-button {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--paper);
+  background: var(--accent);
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 10px 16px;
+  cursor: pointer;
+}
+
+.download-button:disabled {
+  background: var(--rule);
+  color: var(--ink-soft);
+  cursor: wait;
+}
+
+.report-card {
+  background: var(--paper-raised);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-card);
+  padding: 40px 44px;
+}
+
+.report-meta {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 20px;
+}
+
+.meta-chip {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 4px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--rule);
+  color: var(--ink-soft);
+}
+
+.meta-chip.chip-verified {
+  color: var(--verified);
+  border-color: var(--verified);
+}
+
+.meta-chip.chip-caution {
+  color: var(--caution);
+  border-color: var(--caution);
+}
+
+.meta-chip.chip-alert {
+  color: var(--alert);
+  border-color: var(--alert);
+}
+
+.report-body {
+  font-size: 16.5px;
+}
+
+.report-body h1 {
+  font-size: 28px;
+  margin-bottom: 18px;
+}
+
+.report-body h2 {
+  font-size: 21px;
+  margin-top: 32px;
+  margin-bottom: 12px;
+  padding-top: 20px;
+  border-top: 1px solid var(--rule);
+}
+
+.report-body h2:first-child {
+  border-top: none;
+  padding-top: 0;
+  margin-top: 0;
+}
+
+.report-body h3 {
+  font-size: 17px;
+  margin-top: 22px;
+  margin-bottom: 8px;
+}
+
+.report-body p {
+  margin: 0 0 14px;
+}
+
+.report-body ul,
+.report-body ol {
+  margin: 0 0 14px;
+  padding-left: 22px;
+}
+
+.report-body li {
+  margin-bottom: 6px;
+}
+
+.report-body strong {
+  font-weight: 600;
+}
+
+.report-charts {
+  margin-top: 28px;
+  padding-top: 24px;
+  border-top: 1px solid var(--rule);
+}
+
+.report-charts img {
+  max-width: 100%;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-sm);
+  margin-bottom: 16px;
+}
+
+.chart-caption {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink-soft);
+  margin-top: 4px;
+}
+
+.chart-preview {
+  margin-bottom: 24px;
+}
+
+.chart-preview-title {
+  font-weight: 500;
+  margin-bottom: 12px;
+}
+
+.chart-bar-row {
+  display: grid;
+  grid-template-columns: 140px 1fr 90px;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+  font-size: 13px;
+}
+
+.chart-bar-label {
+  color: var(--ink-soft);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chart-bar-track {
+  background: var(--paper);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-sm);
+  height: 16px;
+  overflow: hidden;
+}
+
+.chart-bar-fill {
+  height: 100%;
+  background: var(--accent);
+}
+
+.chart-bar-value {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink-soft);
+  text-align: right;
+}
