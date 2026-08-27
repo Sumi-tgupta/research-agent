@@ -15,8 +15,8 @@ Two things this does:
      already seen (e.g. the same paper turning up via both ArXiv and
      Semantic Scholar, or the same page across two sub-questions).
   2. `rank_by_relevance` — scores every document against the *original*
-     research question on one consistent scale. This matters because
-     Tavily's score and Semantic Scholar's fields aren't comparable to each
+     research question on one consistent scale. This matters because a web
+     result's score and Semantic Scholar's fields aren't comparable to each
      other, but cosine similarity to the same query is.
 """
 

@@ -20,8 +20,19 @@ class Settings(BaseSettings):
         case_sensitive=False,
     )
 
-    # --- Search / retrieval keys ---
-    tavily_api_key: str = ""
+    # --- Web search providers ---
+    # Free-tier web search with automatic fallback (see app/agents/search_agent.py).
+    # SEARCH_PROVIDER=auto tries the configured keyed providers in priority
+    # order — Exa → Serper → Tavily — and always ends at keyless DuckDuckGo, so
+    # search never hard-fails. Or force an exact order with a comma-separated
+    # list, e.g. SEARCH_PROVIDER=serper,duckduckgo.
+    search_provider: str = "auto"
+    exa_api_key: str = ""            # https://exa.ai — recurring monthly free credit
+    exa_search_type: str = "auto"    # auto | fast | neural | keyword
+    serper_api_key: str = ""         # https://serper.dev — ~2,500 free lookups, no card
+    tavily_api_key: str = ""         # https://tavily.com — OPTIONAL (free tier now needs a card)
+
+    # --- Academic / retrieval keys ---
     semantic_scholar_api_key: str = ""  # optional: works without, faster with
 
     # --- LLM keys ---

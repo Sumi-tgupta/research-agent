@@ -24,7 +24,7 @@ flowchart LR
   subgraph DATA["Data & services (all free tier)"]
     DB[(SQLite local · Postgres/Supabase prod)]
     CACHE[(Retrieval cache: sqlite/postgres/redis)]
-    EXT[Tavily · arXiv · Semantic Scholar · OpenAlex · PubMed · Crossref · Wikipedia]
+    EXT[Exa · Serper · DuckDuckGo · arXiv · Semantic Scholar · OpenAlex · PubMed · Crossref · Wikipedia]
     LLM[Gemini · Groq]
   end
 
@@ -77,7 +77,7 @@ frontend shows Writer/Reviewer firing more than once.
 | Stage (node) | Agent | Job |
 |---|---|---|
 | `planner` | PlannerAgent (Gemini) | Decompose the query into sub-questions. |
-| `search_all` | SearchAgent (Tavily) + WikipediaAgent | Web results per sub-question. |
+| `search_all` | SearchAgent (Exa → Serper → DuckDuckGo) + WikipediaAgent | Web results per sub-question. |
 | `retrieve_all` | PaperRetrieval + OpenAlex + PubMed + Crossref | Academic sources per sub-question. |
 | `dedupe_and_rank` | FAISS + local embeddings | Collapse duplicates, rank by relevance — no API cost. |
 | `fact_check` | FactCheckerAgent (Groq/Gemini) | Verdict + confidence per claim; flag contradictions. |
@@ -92,8 +92,10 @@ Seven sources, all free; every keyless one can be toggled off via config without
 touching code (`ENABLE_OPENALEX`, `ENABLE_PUBMED`, `ENABLE_CROSSREF`,
 `ENABLE_WIKIPEDIA`):
 
-Web/Tavily (key) and Wikipedia (keyless) feed `search_all`; arXiv, Semantic
-Scholar (optional key), OpenAlex, PubMed via Europe PMC, and Crossref feed
+Web search (Exa → Serper → DuckDuckGo, using whichever keys are set — DuckDuckGo
+needs none, so `search_all` always has a backstop) and Wikipedia (keyless) feed
+`search_all`; arXiv, Semantic Scholar (optional key), OpenAlex, PubMed via Europe
+PMC, and Crossref feed
 `retrieve_all`. Each agent follows the same pattern: cached, retried with
 backoff, and failure-tolerant — an outage or rate limit on one source is
 recorded in the result's `errors` and the run continues on the rest.

@@ -5,30 +5,18 @@ Mocked end-to-end test of the pipeline, through Phase 5:
         -> writer -> reviewer -(revise, under cap)-> writer
                             \-(approved, or cap reached)-> add_citations -> generate_charts -> END
 
-Every external call (Gemini, Tavily, ArXiv, Semantic Scholar, and the
-embedding model downloads) is mocked. This proves the wiring, state
+Every external call (Gemini, web search, ArXiv, Semantic Scholar, and
+the embedding model downloads) is mocked. This proves the wiring, state
 merging, and revision loop are correct — not that the live services
 behave as documented. Run scripts/run_pipeline.py with real keys for that.
 """
 
 from unittest.mock import MagicMock
 
-from app.config import Settings
 from app.graph import build_research_graph
-from tests.fakes import FakeEmbedder, FakeResponse
+from app.schemas import Document, SourceType
+from tests.fakes import FakeEmbedder, FakeResponse, FakeSearchProvider
 from tests.test_planner import VALID_PLAN_JSON, _fake_gemini_client
-
-FAKE_SETTINGS_WITH_TAVILY_KEY = Settings.model_construct(
-    tavily_api_key="fake-tavily-key",
-    semantic_scholar_api_key="",
-    gemini_api_key="",
-    gemini_model="gemini-2.5-flash",
-    groq_api_key="",
-    groq_model="llama-3.3-70b-versatile",
-    default_web_results=5,
-    default_paper_results=5,
-    request_timeout_seconds=20,
-)
 
 FACT_CHECK_JSON = """
 {
@@ -46,6 +34,13 @@ SINGLE_SUBQ_PLAN_JSON = (
 )
 
 
+def _web_doc(title, url, score=None):
+    """A web-search Document as a provider hands it back. snippet="c" mirrors
+    the old Tavily mock's `content` field, so downstream dedup and citation
+    behavior is identical to before the provider-chain refactor."""
+    return Document(title=title, url=url, snippet="c", source=SourceType.WEB, relevance_score=score)
+
+
 def test_pipeline_wires_planner_output_into_looped_agents(mocker, isolated_cache):
     mocker.patch("app.agents.search_agent.get_default_cache", return_value=isolated_cache)
     mocker.patch("app.agents.paper_retrieval_agent.get_default_cache", return_value=isolated_cache)
@@ -53,11 +48,8 @@ def test_pipeline_wires_planner_output_into_looped_agents(mocker, isolated_cache
         "app.agents.planner_agent.get_gemini_client",
         return_value=_fake_gemini_client(VALID_PLAN_JSON),  # 2 sub-questions
     )
-    mocker.patch("app.agents.search_agent.get_settings", return_value=FAKE_SETTINGS_WITH_TAVILY_KEY)
-    search_mock = mocker.patch(
-        "app.agents.search_agent.TavilyClient.search",
-        return_value={"results": [{"title": "Web result", "url": "https://x.com", "content": "c", "score": 0.5}]},
-    )
+    web_provider = FakeSearchProvider("exa", documents=[_web_doc("Web result", "https://x.com", 0.5)])
+    mocker.patch("app.agents.search_agent._build_provider_chain", return_value=[web_provider])
     mocker.patch("app.agents.paper_retrieval_agent.arxiv.Client.results", return_value=[])
     mocker.patch("app.agents.paper_retrieval_agent.requests.get", return_value=FakeResponse({"data": []}))
     mocker.patch("app.graph.LocalEmbedder", return_value=FakeEmbedder())
@@ -75,10 +67,10 @@ def test_pipeline_wires_planner_output_into_looped_agents(mocker, isolated_cache
 
     assert result["errors"] == []
     assert len(result["plan"].sub_questions) == 2
-    # one call to Tavily per sub-question — proves the loop actually ran
+    # one web-search call per sub-question — proves the loop actually ran
     # over the Planner's output rather than a single hardcoded query
-    assert search_mock.call_count == 2
-    # both mocked Tavily calls return identical content, so the dedup step
+    assert web_provider.calls == 2
+    # both mocked web-search calls return identical content, so the dedup step
     # should have collapsed them to one — proves dedupe_and_rank actually ran
     assert len(result["final_documents"]) == 1
     assert result["final_documents"][0].sub_question is not None
@@ -103,19 +95,12 @@ def test_pipeline_accumulates_errors_from_every_stage_without_crashing(mocker, i
     mocker.patch("app.agents.paper_retrieval_agent.get_default_cache", return_value=isolated_cache)
     mocker.patch("app.retry.time.sleep")  # the persistent 429 below would otherwise retry with real delays
     mocker.patch("app.agents.planner_agent.get_gemini_client", return_value=None)  # -> fallback plan
+    # No web-search provider configured: the keyed provider reports itself
+    # unconfigured and is skipped, so the search stage contributes an error
+    # and no documents — exactly what an empty .env would produce.
     mocker.patch(
-        "app.agents.search_agent.get_settings",
-        return_value=Settings.model_construct(
-            tavily_api_key="",
-            semantic_scholar_api_key="",
-            gemini_api_key="",
-            gemini_model="x",
-            groq_api_key="",
-            groq_model="x",
-            default_web_results=5,
-            default_paper_results=5,
-            request_timeout_seconds=20,
-        ),
+        "app.agents.search_agent._build_provider_chain",
+        return_value=[FakeSearchProvider("exa", requires_key=True, configured=False)],
     )
     mocker.patch("app.agents.paper_retrieval_agent.arxiv.Client.results", side_effect=RuntimeError("arxiv is down"))
     mocker.patch("app.agents.paper_retrieval_agent.requests.get", return_value=FakeResponse({}, status_code=429))
@@ -126,7 +111,7 @@ def test_pipeline_accumulates_errors_from_every_stage_without_crashing(mocker, i
 
     errors = result["errors"]
     assert any("fallback plan" in e for e in errors)  # planner
-    assert any("TAVILY_API_KEY" in e for e in errors)  # search
+    assert any("not configured" in e for e in errors)  # search
     assert any("ArXiv search failed" in e for e in errors)  # papers
     assert any("Semantic Scholar rate limit" in e for e in errors)  # papers
     assert result["final_documents"] == []
@@ -152,10 +137,9 @@ def test_pipeline_degrades_gracefully_if_embedding_model_unavailable(mocker, iso
     mocker.patch("app.agents.search_agent.get_default_cache", return_value=isolated_cache)
     mocker.patch("app.agents.paper_retrieval_agent.get_default_cache", return_value=isolated_cache)
     mocker.patch("app.agents.planner_agent.get_gemini_client", return_value=_fake_gemini_client(VALID_PLAN_JSON))
-    mocker.patch("app.agents.search_agent.get_settings", return_value=FAKE_SETTINGS_WITH_TAVILY_KEY)
     mocker.patch(
-        "app.agents.search_agent.TavilyClient.search",
-        return_value={"results": [{"title": "Web result", "url": "https://x.com", "content": "c", "score": 0.5}]},
+        "app.agents.search_agent._build_provider_chain",
+        return_value=[FakeSearchProvider("exa", documents=[_web_doc("Web result", "https://x.com", 0.5)])],
     )
     mocker.patch("app.agents.paper_retrieval_agent.arxiv.Client.results", return_value=[])
     mocker.patch("app.agents.paper_retrieval_agent.requests.get", return_value=FakeResponse({"data": []}))
@@ -241,14 +225,14 @@ def test_pipeline_resolves_citations_and_extracts_charts(mocker, isolated_cache)
     mocker.patch("app.agents.search_agent.get_default_cache", return_value=isolated_cache)
     mocker.patch("app.agents.paper_retrieval_agent.get_default_cache", return_value=isolated_cache)
     mocker.patch("app.agents.planner_agent.get_gemini_client", return_value=_fake_gemini_client(SINGLE_SUBQ_PLAN_JSON))
-    mocker.patch("app.agents.search_agent.get_settings", return_value=FAKE_SETTINGS_WITH_TAVILY_KEY)
     mocker.patch(
-        "app.agents.search_agent.TavilyClient.search",
-        return_value={
-            "results": [
-                {"title": "Definitive Source", "url": "https://definitive.example/paper", "content": "c", "score": 0.9}
-            ]
-        },
+        "app.agents.search_agent._build_provider_chain",
+        return_value=[
+            FakeSearchProvider(
+                "exa",
+                documents=[_web_doc("Definitive Source", "https://definitive.example/paper", 0.9)],
+            )
+        ],
     )
     mocker.patch("app.agents.paper_retrieval_agent.arxiv.Client.results", return_value=[])
     mocker.patch("app.agents.paper_retrieval_agent.requests.get", return_value=FakeResponse({"data": []}))

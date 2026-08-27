@@ -8,7 +8,7 @@ stage events arrived, and (importantly for the free tiers this project targets)
 how many requests were shed with HTTP 429 instead of crashing.
 
 Why small numbers by default: a single run drives real Planner/Writer/Reviewer
-LLM calls (Gemini/Groq free tier) plus live retrieval (Tavily/Semantic Scholar/
+LLM calls (Gemini/Groq free tier) plus live retrieval (web search/Semantic Scholar/
 arXiv/…), all of which are rate-limited. Hammering with high concurrency will
 mostly measure *their* quotas, not this app. So the defaults stay gentle and
 the script frames a 429 as correct, graceful degradation — the rate limiter

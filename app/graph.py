@@ -8,9 +8,9 @@ Pipeline, wired end-to-end through Phase 5:
 `search_all` / `retrieve_all` loop over the Planner's sub-questions
 sequentially rather than fanning out in parallel. That's deliberate, not
 just simple: ArXiv explicitly asks for a delay between requests (the
-`arxiv` package already enforces this), and Tavily / Semantic Scholar's
-free tiers punish bursts more than they punish a few extra seconds of
-wall-clock time. Sequential looping is naturally polite to all three.
+`arxiv` package already enforces this), and the web-search and Semantic
+Scholar free tiers punish bursts more than they punish a few extra seconds
+of wall-clock time. Sequential looping is naturally polite to all three.
 
 The writer/reviewer loop is capped by `max_revisions` (default 2 total
 review passes, i.e. at most one revision cycle) so a Reviewer that keeps
@@ -77,8 +77,9 @@ class PipelineState(TypedDict, total=False):
 
 
 def _web_agents(settings) -> list:
-    """Web-tier retrievers, in query order. Tavily is the core web search;
-    Wikipedia adds encyclopedic grounding. Each is a plain object exposing
+    """Web-tier retrievers, in query order. SearchAgent is the core web
+    search (a free-tier provider chain — Exa → Serper → DuckDuckGo); Wikipedia
+    adds encyclopedic grounding. Each is a plain object exposing
     `.run(query, max_results=...) -> AgentResult`, so the gather loop treats
     them uniformly. Toggle Wikipedia off via ENABLE_WIKIPEDIA without code
     changes."""

@@ -5,8 +5,9 @@ Live end-to-end run of the full pipeline:
         -> writer <-> reviewer -> add_citations -> generate_charts
 
 Needs real keys in .env (GEMINI_API_KEY for the Planner/Fact Checker/
-Writer/Reviewer/Chart Agent; TAVILY_API_KEY and/or
-SEMANTIC_SCHOLAR_API_KEY for retrieval), plus internet access to download
+Writer/Reviewer/Chart Agent; a web-search key — EXA_API_KEY or
+SERPER_API_KEY — and/or SEMANTIC_SCHOLAR_API_KEY for retrieval, though web
+search falls back to keyless DuckDuckGo), plus internet access to download
 the embedding model on first run (~80MB, cached locally after that — see
 app/vector_store.py). Run from the project root:
 
@@ -15,7 +16,7 @@ app/vector_store.py). Run from the project root:
 Also demonstrates Phase 7's caching layer directly: the same search is run
 twice against SearchAgent/PaperRetrievalAgent before the full pipeline,
 timed both times, so you can see the second call being served from the
-local cache instead of spending Tavily/Semantic Scholar quota on an
+local cache instead of spending web-search/Semantic Scholar quota on an
 identical repeat query.
 """
 
@@ -42,7 +43,7 @@ def _demo_caching(query: str) -> None:
     paper_agent.run(query, max_results=5)
     second_elapsed = time.monotonic() - start
 
-    print(f"First call:  {first_elapsed:.2f}s (hit Tavily/ArXiv/Semantic Scholar)")
+    print(f"First call:  {first_elapsed:.2f}s (hit web search/ArXiv/Semantic Scholar)")
     print(f"Second call: {second_elapsed:.2f}s (should be near-instant — served from .cache/)")
     print()
 

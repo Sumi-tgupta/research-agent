@@ -1,7 +1,7 @@
 """
 Shared schema for anything a retrieval agent finds.
 
-Tavily, ArXiv, and Semantic Scholar all return differently-shaped JSON.
+Web search, ArXiv, and Semantic Scholar all return differently-shaped JSON.
 Every agent normalizes its results into `Document` before handing them
 back, so downstream agents (Fact Checker, Writer, Citation Generator in
 later phases) only ever deal with one shape regardless of where a source

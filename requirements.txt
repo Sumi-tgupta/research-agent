@@ -9,9 +9,16 @@ python-dotenv>=1.2.0
 pyjwt>=2.10.0               # optional Supabase JWT verification (app/auth.py)
 
 # --- Retrieval agents ---
-tavily-python>=0.7.26      # web search (Search Agent)
+# Web search uses a free-tier provider chain (see app/agents/search_agent.py):
+#   Exa → Serper → Tavily → DuckDuckGo. Each SDK is imported lazily, so you
+#   only need the package for the provider(s) you actually use.
+exa-py>=2.14.0             # Exa neural search — recurring monthly free credit
+ddgs>=6.0.0                # keyless DuckDuckGo fallback (renamed from duckduckgo-search;
+                          # search_agent tolerates either import name)
+# Serper (google.serper.dev) needs no SDK — it uses `requests` below.
+tavily-python>=0.7.26      # OPTIONAL: only used when TAVILY_API_KEY is set
 arxiv>=4.0.0                # ArXiv API (Paper Retrieval Agent)
-requests>=2.33.0            # Semantic Scholar API (Paper Retrieval Agent)
+requests>=2.33.0            # Serper web search + Semantic Scholar API
 
 # --- LLMs (free-tier keys) ---
 google-genai>=2.12.0        # Gemini

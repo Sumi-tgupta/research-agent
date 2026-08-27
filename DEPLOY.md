@@ -45,7 +45,7 @@ Two independent pieces ship separately:
 - [Supabase](https://supabase.com) account — Postgres + auth (optional but needed for sign-in and the saved library).
 - One backend host: [Hugging Face](https://huggingface.co) Spaces, [Render](https://render.com), or [Fly.io](https://fly.io).
 - [Vercel](https://vercel.com) account — frontend.
-- API keys from `.env.example` (Tavily, Gemini, Groq — all free tier).
+- API keys from `.env.example` (Gemini, plus a web-search key — Exa or Serper — and optionally Groq; all free tier).
 
 ---
 
@@ -97,7 +97,8 @@ platform health check.
 | --- | --- | --- |
 | `GEMINI_API_KEY` | Yes | Free at aistudio.google.com |
 | `GROQ_API_KEY` | Recommended | Enables fast-model routing + fallback |
-| `TAVILY_API_KEY` | Recommended | Web search |
+| `EXA_API_KEY` | Recommended | Primary web search (free monthly credit) |
+| `SERPER_API_KEY` | Recommended | Web-search fallback (~2,500 free lookups); keyless DuckDuckGo backstops both |
 | `DATABASE_URL` | For persistence | `postgresql+pg8000://…` from step 1; else SQLite (ephemeral) |
 | `CACHE_BACKEND` | Recommended | `postgres` or `redis` in prod (see §4) |
 | `ALLOWED_ORIGINS` | Yes for prod | Your Vercel URL(s), comma-separated (see §3) |
@@ -263,7 +264,8 @@ backend redeploys per your host's settings.
 [`.env.example`](.env.example):
 
 ```
-GEMINI_API_KEY=            GROQ_API_KEY=           TAVILY_API_KEY=
+GEMINI_API_KEY=            GROQ_API_KEY=
+EXA_API_KEY=               SERPER_API_KEY=         SEARCH_PROVIDER=auto
 DATABASE_URL=              CACHE_BACKEND=sqlite    REDIS_URL=
 ALLOWED_ORIGINS=           RATE_LIMIT_ENABLED=false
 SUPABASE_JWT_SECRET=       SUPABASE_URL=

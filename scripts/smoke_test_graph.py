@@ -3,8 +3,9 @@ Proves search_agent_node / paper_retrieval_node slot into a real LangGraph
 StateGraph. This is a smoke test, not Phase 2's orchestration — there's no
 Planner and the two nodes just run in sequence with no branching logic.
 
-Requires TAVILY_API_KEY (and ideally SEMANTIC_SCHOLAR_API_KEY) in .env,
-since it makes live calls. Run from the project root:
+Since it makes live calls, set a web-search key — EXA_API_KEY or
+SERPER_API_KEY (and ideally SEMANTIC_SCHOLAR_API_KEY) — in .env; with none
+set it still runs via keyless DuckDuckGo. Run from the project root:
 
     python -m scripts.smoke_test_graph "your query here"
 """

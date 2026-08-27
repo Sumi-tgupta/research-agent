@@ -2,8 +2,9 @@
 A simple persistent, TTL-based cache for expensive/rate-limited retrieval
 calls (web search, paper lookups). Backed by SQLite (stdlib — no extra
 dependency) specifically so cached results survive process restarts: the
-whole point is not re-spending Tavily's 1,000-credit/month budget (or
-Semantic Scholar's shared rate limit) on a query already made yesterday,
+whole point is not re-spending a web-search provider's free budget (Exa's
+monthly credit, Serper's lookup quota) or Semantic Scholar's shared rate
+limit on a query already made yesterday,
 which an in-memory-only cache wouldn't help with at all.
 
 Deliberately scoped to the raw retrieval agents (Search, Paper Retrieval)
@@ -51,7 +52,7 @@ class Cache:
 
     @staticmethod
     def make_key(namespace: str, **params: Any) -> str:
-        """A stable cache key from a namespace (e.g. 'tavily_search') plus
+        """A stable cache key from a namespace (e.g. 'exa_search') plus
         arbitrary parameters, hashed so keys stay a fixed short length
         regardless of query text length. `sort_keys=True` means parameter
         order never matters."""

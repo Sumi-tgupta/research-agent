@@ -69,22 +69,28 @@ can take a while; they're cached afterward. This is expected, not a hang.
 Copy-Item .env.example .env          # macOS/Linux: cp .env.example .env
 ```
 
-Open `.env` and fill in the keys. Only the first two are required for a real
-run; everything else has a safe default and can stay blank.
+Open `.env` and fill in the keys. A Gemini key is required; a web-search key
+(Exa or Serper) is strongly recommended. Everything else has a safe default and
+can stay blank — web search falls back to keyless DuckDuckGo if you set no
+search key.
 
 | Key | Required? | Where to get it (all free, no card) |
 |---|---|---|
 | `GEMINI_API_KEY` | **Yes** | https://aistudio.google.com/apikey |
-| `TAVILY_API_KEY` | **Yes** | https://tavily.com |
+| `EXA_API_KEY` | Recommended | https://exa.ai |
+| `SERPER_API_KEY` | Recommended | https://serper.dev |
 | `GROQ_API_KEY` | Recommended | https://console.groq.com/keys |
 | `SEMANTIC_SCHOLAR_API_KEY` | Optional | https://www.semanticscholar.org/product/api |
 
-arXiv, Wikipedia, OpenAlex, PubMed (Europe PMC), and Crossref need no key. The
-full annotated list of settings is in `.env.example` and `app/config.py`.
+`SEARCH_PROVIDER=auto` (the default) tries Exa → Serper → DuckDuckGo, using
+whichever keys you set. DuckDuckGo web search, arXiv, Wikipedia, OpenAlex,
+PubMed (Europe PMC), and Crossref need no key; Tavily is optional
+(`TAVILY_API_KEY`). The full annotated list of settings is in `.env.example`
+and `app/config.py`.
 
 > **Without any keys**, the backend still starts and the test suite still passes
-> (external calls are faked in tests), but a live `/research` run won't have a
-> search provider or an LLM to call.
+> (external calls are faked in tests). A live `/research` run still has keyless
+> DuckDuckGo for web search, but no LLM to call — so add at least a Gemini key.
 
 ---
 

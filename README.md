@@ -22,8 +22,9 @@ You ask a research question. A LangGraph pipeline of specialized agents takes
 it from there:
 
 1. A **Planner** breaks the question into focused sub-questions.
-2. **Retrieval agents** gather sources in parallel from the web (Tavily),
-   Wikipedia, and the academic literature (arXiv, Semantic Scholar, OpenAlex,
+2. **Retrieval agents** gather sources in parallel from the web (Exa, Serper,
+   or keyless DuckDuckGo — whichever is configured), Wikipedia, and the
+   academic literature (arXiv, Semantic Scholar, OpenAlex,
    PubMed/Europe PMC, Crossref).
 3. A **dedupe-and-rank** stage collapses duplicates and orders by relevance
    using local embeddings (FAISS) — no API cost.
@@ -107,13 +108,16 @@ command should print) is in [`SETUP_AND_RUN.md`](SETUP_AND_RUN.md).
 
 ### Backend keys (repo-root `.env`)
 
-Only the first two are needed to get a real report. Everything else has a safe
-default.
+A Gemini key is required; a web-search key (Exa or Serper) is strongly
+recommended. Everything else has a safe default — including web search, which
+falls back to keyless DuckDuckGo if you set no search key at all.
 
 | Key | Required? | Get it at | Notes |
 |---|---|---|---|
 | `GEMINI_API_KEY` | **Yes** | aistudio.google.com/apikey | Free, no card. Powers every reasoning stage. |
-| `TAVILY_API_KEY` | **Yes** | tavily.com | Free tier: 1,000 web-search credits/month. |
+| `EXA_API_KEY` | Recommended | exa.ai | Free tier: recurring monthly credit, no card. Primary web search. |
+| `SERPER_API_KEY` | Recommended | serper.dev | Free tier: ~2,500 lookups, no card. Tried after Exa. |
+| `SEARCH_PROVIDER` | Optional | — | `auto` (default) tries Exa → Serper → DuckDuckGo. Or force an order, e.g. `serper,duckduckgo`. |
 | `GROQ_API_KEY` | Recommended | console.groq.com/keys | Free, no card. Speeds up the "light" stages when routing is on. |
 | `SEMANTIC_SCHOLAR_API_KEY` | Optional | semanticscholar.org/product/api | Works without; a free key gives a higher rate limit. |
 | `DATABASE_URL` | Optional | — | Defaults to local SQLite. Point at Supabase Postgres in prod. |
@@ -121,7 +125,9 @@ default.
 | `RATE_LIMIT_ENABLED` | Optional | — | Off by default; turn on for shared deployments. |
 | `SUPABASE_JWT_SECRET` / `SUPABASE_URL` | Optional | Supabase project | Enables the backend to *recognize* signed-in users. |
 
-arXiv, Wikipedia, OpenAlex, PubMed (Europe PMC), and Crossref need **no key**.
+DuckDuckGo web search, arXiv, Wikipedia, OpenAlex, PubMed (Europe PMC), and
+Crossref need **no key** (Tavily still works if you set `TAVILY_API_KEY`, but
+it's optional now that its free tier asks for a card).
 Local embedding models download once from Hugging Face on first run, then run
 fully offline. The complete annotated list is in `.env.example` and
 [`app/config.py`](app/config.py).

@@ -41,3 +41,39 @@ class FakeResponse:
 
     def json(self):
         return self._payload
+
+
+class FakeSearchProvider:
+    """Test double for a SearchAgent web-search provider. Configurable to
+    return documents, return nothing, raise, or report itself unconfigured —
+    which is everything the agent's ordering / fallback / skip logic branches
+    on. Records how many times `search` was actually called so tests can prove
+    a provider was (or wasn't) reached."""
+
+    def __init__(
+        self,
+        name="fake",
+        *,
+        requires_key=False,
+        configured=True,
+        documents=None,
+        error=None,
+    ):
+        self.name = name
+        self.requires_key = requires_key
+        self._configured = configured
+        self._documents = documents if documents is not None else []
+        self._error = error
+        self.calls = 0
+
+    def is_configured(self) -> bool:
+        return self._configured
+
+    def search(self, query, max_results, timeout):
+        self.calls += 1
+        if self._error is not None:
+            raise self._error
+        # Fresh Document instances each call, like a real provider — the graph
+        # mutates doc.sub_question per sub-question, so callers must not share
+        # one object across calls.
+        return [doc.model_copy() for doc in self._documents]
