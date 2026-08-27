@@ -25,6 +25,37 @@ STAGE_LABELS = {
     "generate_charts": "Chart Generator",
 }
 
+# Short, human-facing names for each retrieval source, used in the live feed's
+# per-stage breakdown (e.g. "12 papers found (5 arXiv, 4 OpenAlex, 3 PubMed)").
+SOURCE_DISPLAY = {
+    "web": "web",
+    "wikipedia": "Wikipedia",
+    "arxiv": "arXiv",
+    "semantic_scholar": "Semantic Scholar",
+    "openalex": "OpenAlex",
+    "pubmed": "PubMed",
+    "crossref": "Crossref",
+}
+
+
+def _source_breakdown(documents: list) -> str:
+    """"(5 arXiv, 4 OpenAlex, 3 PubMed)" — a per-source count, largest first.
+    Empty string when only one source contributed (nothing to break down)."""
+    counts: dict[str, int] = {}
+    for doc in documents:
+        source = getattr(doc, "source", None)
+        key = getattr(source, "value", source)
+        if key is None:
+            continue
+        counts[key] = counts.get(key, 0) + 1
+    if len(counts) < 2:
+        return ""
+    parts = [
+        f"{count} {SOURCE_DISPLAY.get(key, key)}"
+        for key, count in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+    ]
+    return f" ({', '.join(parts)})"
+
 
 def summarize_stage(node_name: str, update: dict) -> str:
     """A short, human-readable line describing what this node's update
@@ -35,12 +66,14 @@ def summarize_stage(node_name: str, update: dict) -> str:
         return f"{n} sub-question{'s' if n != 1 else ''} drafted"
 
     if node_name == "search_all":
-        n = len(update.get("web_results", []))
-        return f"{n} web result{'s' if n != 1 else ''} found"
+        docs = update.get("web_results", [])
+        n = len(docs)
+        return f"{n} web result{'s' if n != 1 else ''} found{_source_breakdown(docs)}"
 
     if node_name == "retrieve_all":
-        n = len(update.get("paper_results", []))
-        return f"{n} paper{'s' if n != 1 else ''} found"
+        docs = update.get("paper_results", [])
+        n = len(docs)
+        return f"{n} paper{'s' if n != 1 else ''} found{_source_breakdown(docs)}"
 
     if node_name == "dedupe_and_rank":
         n = len(update.get("final_documents", []))

@@ -35,13 +35,18 @@ from typing import TypedDict
 from langgraph.graph import END, START, StateGraph
 
 from app.agents.chart_agent import ChartAgent
+from app.agents.crossref_agent import CrossrefAgent
 from app.agents.fact_checker_agent import FactCheckerAgent
+from app.agents.openalex_agent import OpenAlexAgent
 from app.agents.paper_retrieval_agent import PaperRetrievalAgent
 from app.agents.planner_agent import planner_node
+from app.agents.pubmed_agent import PubMedAgent
 from app.agents.reviewer_agent import ReviewerAgent
 from app.agents.search_agent import SearchAgent
+from app.agents.wikipedia_agent import WikipediaAgent
 from app.agents.writer_agent import WriterAgent
 from app.citations import append_references_section, build_source_index
+from app.config import get_settings
 from app.embedding_service import get_default_embedder
 from app.retrieval_index import build_retrieval_index, retrieve_supplementary_excerpts
 from app.schemas import ChartSpec, Document, ReviewDecision, ResearchPlan, VerifiedClaim
@@ -71,57 +76,98 @@ class PipelineState(TypedDict, total=False):
     errors: list[str]
 
 
-def search_all_subquestions_node(state: PipelineState) -> dict:
-    plan = state["plan"]
-    max_results = state.get("max_results_per_subquestion", 5)
-    agent = SearchAgent()
+def _web_agents(settings) -> list:
+    """Web-tier retrievers, in query order. Tavily is the core web search;
+    Wikipedia adds encyclopedic grounding. Each is a plain object exposing
+    `.run(query, max_results=...) -> AgentResult`, so the gather loop treats
+    them uniformly. Toggle Wikipedia off via ENABLE_WIKIPEDIA without code
+    changes."""
+    agents = [SearchAgent()]
+    if settings.enable_wikipedia:
+        agents.append(WikipediaAgent())
+    return agents
 
+
+def _academic_agents(settings) -> list:
+    """Paper-tier retrievers. PaperRetrievalAgent already covers arXiv +
+    Semantic Scholar; OpenAlex, Europe PMC (PubMed), and Crossref are added
+    when enabled. All keyless/free and independently toggleable."""
+    agents = [PaperRetrievalAgent()]
+    if settings.enable_openalex:
+        agents.append(OpenAlexAgent())
+    if settings.enable_pubmed:
+        agents.append(PubMedAgent())
+    if settings.enable_crossref:
+        agents.append(CrossrefAgent())
+    return agents
+
+
+def _gather_over_subquestions(sub_questions, agents, query_of, max_results, label):
+    """Runs every enabled retriever over every sub-question and merges the
+    results, tagging each Document with the sub-question it came from.
+
+    Concurrency mirrors the original single-source design: sub-questions run
+    in parallel (one worker each), while the sources *within* a sub-question
+    run sequentially in that worker. That keeps us polite to any one service
+    (never more than `len(sub_questions)` concurrent hits to the same API,
+    same as before) while still adding breadth across services. A failure in
+    one source is captured in `errors`, never raised, so it can't sink the
+    others."""
     documents: list[Document] = []
     errors: list[str] = []
 
-    def _fetch_web(sub_q):
-        res = agent.run(sub_q.web_query, max_results=max_results)
-        for doc in res.documents:
-            doc.sub_question = sub_q.question
-        return res.documents, res.errors
+    def worker(sub_q):
+        query = query_of(sub_q)
+        docs: list[Document] = []
+        errs: list[str] = []
+        for agent in agents:
+            result = agent.run(query, max_results=max_results)
+            for doc in result.documents:
+                doc.sub_question = sub_q.question
+            docs.extend(result.documents)
+            errs.extend(result.errors)
+        return docs, errs
 
-    with ThreadPoolExecutor(max_workers=min(5, max(1, len(plan.sub_questions)))) as executor:
-        futures = [executor.submit(_fetch_web, sub_q) for sub_q in plan.sub_questions]
+    with ThreadPoolExecutor(max_workers=min(5, max(1, len(sub_questions)))) as executor:
+        futures = [executor.submit(worker, sub_q) for sub_q in sub_questions]
         for future in as_completed(futures):
             try:
                 docs, errs = future.result()
                 documents.extend(docs)
                 errors.extend(errs)
             except Exception as exc:
-                errors.append(f"Web search sub-question worker failed: {exc}")
+                errors.append(f"{label} sub-question worker failed: {exc}")
 
+    return documents, errors
+
+
+def search_all_subquestions_node(state: PipelineState) -> dict:
+    plan = state["plan"]
+    max_results = state.get("max_results_per_subquestion", 5)
+    agents = _web_agents(get_settings())
+
+    documents, errors = _gather_over_subquestions(
+        plan.sub_questions,
+        agents,
+        query_of=lambda sub_q: sub_q.web_query,
+        max_results=max_results,
+        label="Web search",
+    )
     return {"web_results": documents, "errors": [*state.get("errors", []), *errors]}
 
 
 def retrieve_all_subquestions_node(state: PipelineState) -> dict:
     plan = state["plan"]
     max_results = state.get("max_results_per_subquestion", 5)
-    agent = PaperRetrievalAgent()
+    agents = _academic_agents(get_settings())
 
-    documents: list[Document] = []
-    errors: list[str] = []
-
-    def _fetch_paper(sub_q):
-        res = agent.run(sub_q.academic_query, max_results=max_results)
-        for doc in res.documents:
-            doc.sub_question = sub_q.question
-        return res.documents, res.errors
-
-    with ThreadPoolExecutor(max_workers=min(5, max(1, len(plan.sub_questions)))) as executor:
-        futures = [executor.submit(_fetch_paper, sub_q) for sub_q in plan.sub_questions]
-        for future in as_completed(futures):
-            try:
-                docs, errs = future.result()
-                documents.extend(docs)
-                errors.extend(errs)
-            except Exception as exc:
-                errors.append(f"Paper retrieval sub-question worker failed: {exc}")
-
+    documents, errors = _gather_over_subquestions(
+        plan.sub_questions,
+        agents,
+        query_of=lambda sub_q: sub_q.academic_query,
+        max_results=max_results,
+        label="Paper retrieval",
+    )
     return {"paper_results": documents, "errors": [*state.get("errors", []), *errors]}
 
 

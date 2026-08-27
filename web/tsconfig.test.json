@@ -1,0 +1,15 @@
+{
+  "//": "Type-checks the test suite in isolation (npm run typecheck:test). Kept separate so a type error in tests can never block `next build`, which uses tsconfig.json (tests are excluded there).",
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "types": ["vitest/globals", "@testing-library/jest-dom", "node"]
+  },
+  "include": [
+    "vitest.config.ts",
+    "vitest.setup.ts",
+    "playwright.config.ts",
+    "tests/**/*.ts",
+    "tests/**/*.tsx"
+  ]
+}

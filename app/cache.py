@@ -91,14 +91,178 @@ class Cache:
             conn.execute("DELETE FROM cache_entries")
 
 
+# --------------------------------------------------------------------------- #
+# Alternate backends (Phase 12)
+#
+# The default SQLite backend above writes to a local file, which is perfect for
+# dev and self-hosting but useless on hosts with an ephemeral filesystem (HF
+# Spaces, Render's free tier): the file — and thus the whole point of surviving
+# restarts — vanishes on every redeploy. These two backends move the same cache
+# to durable shared infrastructure the free stack already provides. Both
+# subclass Cache so agents keep their `cache: Cache | None` annotations and the
+# shared `Cache.make_key` unchanged; only the storage of a key/value/timestamp
+# differs. Neither is in the ORM or Alembic on purpose — cache rows are
+# disposable operational data, recreated on demand, not user content.
+# --------------------------------------------------------------------------- #
+
+
+class RedisCache(Cache):
+    """Redis-backed cache (the free tier of Upstash/Redis Cloud works well).
+
+    Keys are namespaced with a fixed prefix so ``clear()`` only drops this app's
+    entries via SCAN — it never issues FLUSHDB, which would wipe a database that
+    might be shared with something else. TTL is delegated to Redis itself
+    (``SET ... EX``), so there's none of the SQLite backend's created_at
+    bookkeeping.
+    """
+
+    _PREFIX = "apexcache:"
+
+    def __init__(self, url: str, ttl_seconds: float = DEFAULT_TTL_SECONDS):
+        # NB: deliberately does NOT call super().__init__ — we don't want the
+        # SQLite file created/opened for a Redis-backed instance.
+        try:
+            import redis  # lazy: only imported when this backend is selected
+        except Exception as exc:  # pragma: no cover - exercised via the factory's fallback
+            raise RuntimeError(
+                "cache_backend='redis' needs the 'redis' package (pip install redis)"
+            ) from exc
+        self.ttl_seconds = ttl_seconds
+        # decode_responses=True → get() returns str, not bytes.
+        self._client = redis.Redis.from_url(url, decode_responses=True)
+        # Ping now so an unreachable server fails here, letting the factory fall
+        # back to SQLite at startup rather than on the first cached call.
+        self._client.ping()
+
+    def _k(self, key: str) -> str:
+        return f"{self._PREFIX}{key}"
+
+    def get(self, key: str) -> Any | None:
+        raw = self._client.get(self._k(key))
+        return json.loads(raw) if raw is not None else None
+
+    def set(self, key: str, value: Any) -> None:
+        self._client.set(self._k(key), json.dumps(value, default=str), ex=int(self.ttl_seconds))
+
+    def delete(self, key: str) -> None:
+        self._client.delete(self._k(key))
+
+    def clear(self) -> None:
+        for k in self._client.scan_iter(match=f"{self._PREFIX}*"):
+            self._client.delete(k)
+
+
+class PostgresCache(Cache):
+    """SQL cache over a SQLAlchemy engine — intended for the same Postgres the
+    saved library uses (reuse ``DATABASE_URL``), so the retrieval cache survives
+    restarts on an ephemeral host.
+
+    Mirrors the SQLite backend's schema and read-time TTL/expiry-delete. The SQL
+    (``CREATE TABLE IF NOT EXISTS`` + ``INSERT ... ON CONFLICT``) is understood
+    by both Postgres and SQLite, so a misconfigured sqlite URL still works rather
+    than erroring.
+    """
+
+    def __init__(self, url: str, ttl_seconds: float = DEFAULT_TTL_SECONDS):
+        # As with RedisCache, no super().__init__: no local SQLite file.
+        from sqlalchemy import create_engine
+
+        self.ttl_seconds = ttl_seconds
+        self._engine = create_engine(url, pool_pre_ping=True)
+        self._init_table()
+
+    def _init_table(self) -> None:
+        from sqlalchemy import text
+
+        with self._engine.begin() as conn:
+            conn.execute(
+                text(
+                    "CREATE TABLE IF NOT EXISTS retrieval_cache ("
+                    "key VARCHAR(64) PRIMARY KEY, value TEXT NOT NULL, "
+                    "created_at DOUBLE PRECISION NOT NULL)"
+                )
+            )
+
+    def get(self, key: str) -> Any | None:
+        from sqlalchemy import text
+
+        with self._engine.connect() as conn:
+            row = conn.execute(
+                text("SELECT value, created_at FROM retrieval_cache WHERE key = :k"),
+                {"k": key},
+            ).fetchone()
+        if row is None:
+            return None
+        value_json, created_at = row[0], row[1]
+        if time.time() - float(created_at) > self.ttl_seconds:
+            self.delete(key)
+            return None
+        return json.loads(value_json)
+
+    def set(self, key: str, value: Any) -> None:
+        from sqlalchemy import text
+
+        with self._engine.begin() as conn:
+            conn.execute(
+                text(
+                    "INSERT INTO retrieval_cache (key, value, created_at) "
+                    "VALUES (:k, :v, :c) "
+                    "ON CONFLICT (key) DO UPDATE SET "
+                    "value = excluded.value, created_at = excluded.created_at"
+                ),
+                {"k": key, "v": json.dumps(value, default=str), "c": time.time()},
+            )
+
+    def delete(self, key: str) -> None:
+        from sqlalchemy import text
+
+        with self._engine.begin() as conn:
+            conn.execute(text("DELETE FROM retrieval_cache WHERE key = :k"), {"k": key})
+
+    def clear(self) -> None:
+        from sqlalchemy import text
+
+        with self._engine.begin() as conn:
+            conn.execute(text("DELETE FROM retrieval_cache"))
+
+
 _default_cache: Cache | None = None
 
 
+def _build_cache_from_settings() -> Cache:
+    """Pick a cache backend from ``settings.cache_backend`` ("sqlite" | "redis" |
+    "postgres"). A cache is a pure optimization, so any backend that can't be
+    built (missing driver, unreachable server, blank URL) degrades to the
+    always-available local SQLite backend rather than failing retrieval — the
+    only cost of a misconfigured backend is a cold cache, never a broken run."""
+    from app.config import get_settings  # lazy: avoids an import cycle at load
+
+    settings = get_settings()
+    backend = (getattr(settings, "cache_backend", "sqlite") or "sqlite").strip().lower()
+    try:
+        if backend == "redis":
+            if not settings.redis_url:
+                return Cache()  # no URL configured → local file cache
+            return RedisCache(settings.redis_url)
+        if backend == "postgres":
+            return PostgresCache(settings.database_url)
+    except Exception:
+        return Cache()  # fail open to the local backend
+    return Cache()
+
+
 def get_default_cache() -> Cache:
-    """A shared, lazily-created Cache instance at the default path, so
-    agents that don't need a custom cache (i.e. everywhere except tests)
-    don't each open their own separate SQLite connection pool."""
+    """A shared, lazily-created Cache instance selected by config, so agents
+    that don't need a custom cache (i.e. everywhere except tests) don't each
+    open their own separate backend connection."""
     global _default_cache
     if _default_cache is None:
-        _default_cache = Cache()
+        _default_cache = _build_cache_from_settings()
     return _default_cache
+
+
+def reset_default_cache() -> None:
+    """Drop the memoized default instance so the next ``get_default_cache()``
+    rebuilds it — used by tests, and after a settings change."""
+    global _default_cache
+    _default_cache = None

@@ -17,6 +17,11 @@ class SourceType(str, Enum):
     WEB = "web"
     ARXIV = "arxiv"
     SEMANTIC_SCHOLAR = "semantic_scholar"
+    # Phase 12 — additional keyless / free retrieval sources.
+    OPENALEX = "openalex"
+    PUBMED = "pubmed"            # queried via Europe PMC's keyless JSON API
+    CROSSREF = "crossref"
+    WIKIPEDIA = "wikipedia"
 
 
 class Document(BaseModel):

@@ -28,9 +28,8 @@ fallback, not presented as a finished report.
 """
 
 from app.citations import build_source_index
-from app.config import get_settings
 from app.llm_clients import get_gemini_client
-from app.retry import call_with_backoff, is_retryable_http_error
+from app.model_router import Tier, generate_text
 from app.schemas import Document, ResearchPlan, VerifiedClaim
 
 WRITER_PROMPT = """You are the writing stage of a multi-agent research system that produces publication-quality reports. Write the report in {target_language}.
@@ -141,9 +140,6 @@ def _fallback_draft(plan: ResearchPlan, verified_claims: list[VerifiedClaim]) ->
 
 
 class WriterAgent:
-    def __init__(self):
-        self.settings = get_settings()
-
     def draft(
         self,
         plan: ResearchPlan,
@@ -155,14 +151,9 @@ class WriterAgent:
     ) -> tuple[str, list[str]]:
         """Returns (draft_text, errors). Always returns usable text — a
         failed LLM call degrades to a mechanical claims summary rather
-        than an empty string, so the pipeline always produces something."""
-        client = get_gemini_client()
-        if client is None:
-            return (
-                _fallback_draft(plan, verified_claims),
-                ["GEMINI_API_KEY not configured — used an unformatted claims summary instead of a written draft"],
-            )
-
+        than an empty string, so the pipeline always produces something.
+        Writing is a "heavy" reasoning stage: it prefers Gemini and falls
+        back to Groq via the model router; a fallback is noted in `errors`."""
         revision_block = ""
         if previous_draft and feedback:
             revision_block = REVISION_BLOCK_TEMPLATE.format(previous_draft=previous_draft, feedback=feedback)
@@ -174,16 +165,17 @@ class WriterAgent:
             revision_block=revision_block,
         )
 
+        warnings: list[str] = []
         try:
-            response = call_with_backoff(
-                lambda: client.models.generate_content(model=self.settings.gemini_model, contents=prompt),
-                is_retryable=is_retryable_http_error,
+            draft = generate_text(
+                prompt,
+                tier=Tier.HEAVY,
+                warnings=warnings,
+                gemini_client_factory=get_gemini_client,
             )
-            if not response.text or not response.text.strip():
-                raise ValueError("Gemini returned an empty draft")
-            return response.text, []
+            return draft, warnings
         except Exception as exc:
             return (
                 _fallback_draft(plan, verified_claims),
-                [f"Writer LLM call failed, used unformatted claims summary instead: {exc}"],
+                [f"Writer LLM call failed, used an unformatted claims summary instead: {exc}"],
             )

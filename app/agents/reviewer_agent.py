@@ -12,11 +12,8 @@ forever trying to fix it, or block the report from being produced because
 the reviewer itself is broken. The failure is still surfaced as an error.
 """
 
-from google.genai import types
-
-from app.config import get_settings
 from app.llm_clients import get_gemini_client
-from app.retry import call_with_backoff, is_retryable_http_error
+from app.model_router import Tier, generate_structured
 from app.schemas import ReviewDecision, ReviewResult, ResearchPlan, VerifiedClaim
 
 REVIEWER_PROMPT = """You are the review stage of a multi-agent research system that produces publication-quality reports. Check the draft below against the verified claims it should be based on.
@@ -51,9 +48,6 @@ def _format_claims_summary(verified_claims: list[VerifiedClaim]) -> str:
 
 
 class ReviewerAgent:
-    def __init__(self):
-        self.settings = get_settings()
-
     def review(
         self,
         plan: ResearchPlan,
@@ -61,14 +55,9 @@ class ReviewerAgent:
         verified_claims: list[VerifiedClaim],
     ) -> tuple[ReviewResult, list[str]]:
         """Returns (result, errors). Defaults to APPROVE on any failure —
-        see module docstring for why that's the safe default here."""
-        client = get_gemini_client()
-        if client is None:
-            return (
-                ReviewResult(decision=ReviewDecision.APPROVE, feedback=""),
-                ["GEMINI_API_KEY not configured — skipped review, draft approved by default"],
-            )
-
+        see module docstring for why that's the safe default here. Review is
+        a "heavy" reasoning stage: it prefers Gemini and falls back to Groq
+        via the model router; a fallback is noted in `errors`."""
         prompt = REVIEWER_PROMPT.format(
             original_query=plan.original_query,
             sub_questions="\n".join(f"- {sq.question}" for sq in plan.sub_questions),
@@ -76,21 +65,18 @@ class ReviewerAgent:
             draft=draft,
         )
 
+        warnings: list[str] = []
         try:
-            response = call_with_backoff(
-                lambda: client.models.generate_content(
-                    model=self.settings.gemini_model,
-                    contents=prompt,
-                    config=types.GenerateContentConfig(
-                        response_mime_type="application/json",
-                        response_schema=ReviewResult,
-                    ),
-                ),
-                is_retryable=is_retryable_http_error,
+            result = generate_structured(
+                prompt,
+                tier=Tier.HEAVY,
+                schema=ReviewResult,
+                warnings=warnings,
+                gemini_client_factory=get_gemini_client,
             )
-            return ReviewResult.model_validate_json(response.text), []
+            return result, warnings
         except Exception as exc:
             return (
                 ReviewResult(decision=ReviewDecision.APPROVE, feedback=""),
-                [f"Review failed, draft approved by default: {exc}"],
+                [*warnings, f"Review failed — skipped review, draft approved by default: {exc}"],
             )

@@ -28,12 +28,10 @@ malformed-request-style error fails immediately and falls straight
 through to the existing "return empty claims, report the error" path.
 """
 
-from google.genai import types
 from pydantic import BaseModel, Field
 
-from app.config import get_settings
 from app.llm_clients import get_gemini_client
-from app.retry import call_with_backoff, is_retryable_http_error
+from app.model_router import Tier, generate_structured
 from app.schemas import ClaimVerdict, Document, VerifiedClaim
 from app.vector_store import Embedder
 
@@ -108,7 +106,6 @@ class FactCheckerAgent:
         """`embedder` is optional — without one, groundedness checking is
         skipped and claims rely solely on the LLM's own source attribution.
         Pass a real embedder (e.g. LocalEmbedder) to enable the sanity net."""
-        self.settings = get_settings()
         self._embedder = embedder
 
     def run(
@@ -119,31 +116,25 @@ class FactCheckerAgent:
     ) -> tuple[list[VerifiedClaim], list[str]]:
         """Returns (claims, errors). Never fabricates a fallback claim — if
         fact-checking can't run, it returns an empty list plus a clear
-        error rather than guessing at what the sources say."""
+        error rather than guessing at what the sources say. Claim extraction
+        is a "light" stage: it prefers Groq's fast model and falls back to
+        Gemini via the model router (see model_router.py)."""
         sources = documents[:max_sources]
         if not sources:
             return [], []
 
-        client = get_gemini_client()
-        if client is None:
-            return [], [f"GEMINI_API_KEY not configured — skipped fact-checking for '{sub_question}'"]
-
+        warnings: list[str] = []
         try:
-            response = call_with_backoff(
-                lambda: client.models.generate_content(
-                    model=self.settings.gemini_model,
-                    contents=FACT_CHECK_PROMPT.format(
-                        sub_question=sub_question,
-                        numbered_sources=_format_sources(sources),
-                    ),
-                    config=types.GenerateContentConfig(
-                        response_mime_type="application/json",
-                        response_schema=_LLMFactCheckOutput,
-                    ),
+            llm_output = generate_structured(
+                FACT_CHECK_PROMPT.format(
+                    sub_question=sub_question,
+                    numbered_sources=_format_sources(sources),
                 ),
-                is_retryable=is_retryable_http_error,
+                tier=Tier.LIGHT,
+                schema=_LLMFactCheckOutput,
+                warnings=warnings,
+                gemini_client_factory=get_gemini_client,
             )
-            llm_output = _LLMFactCheckOutput.model_validate_json(response.text)
         except Exception as exc:
             return [], [f"Fact-checking failed for '{sub_question}': {exc}"]
 
@@ -173,4 +164,4 @@ class FactCheckerAgent:
                 )
             )
 
-        return claims, []
+        return claims, warnings

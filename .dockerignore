@@ -1,0 +1,46 @@
+# Build-context excludes for the backend API image (see Dockerfile).
+# Goal: ship only what the Python service needs at runtime, and never leak
+# local state or secrets into the image layers.
+
+# --- Python bytecode & tool caches ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# --- Local virtualenv & runtime caches (huge; never ship) ---
+.venv/
+venv/
+.cache/
+*.sqlite3
+*.db
+
+# --- Secrets / local env (keep the example so the image can document defaults) ---
+.env
+.env.*
+!.env.example
+
+# --- Frontends: deployed separately to Vercel, not part of the API image ---
+web/
+frontend/
+node_modules/
+
+# --- VCS & editors ---
+.git/
+.gitignore
+.idea/
+.vscode/
+
+# --- Docs & CI: not needed at runtime ---
+*.md
+.github/
+
+# --- Tests & one-off scripts ---
+tests/
+scripts/
+
+# --- Docker files themselves ---
+Dockerfile
+.dockerignore

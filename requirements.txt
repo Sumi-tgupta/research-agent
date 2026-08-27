@@ -6,6 +6,7 @@ uvicorn[standard]>=0.51.0
 pydantic>=2.13.0
 pydantic-settings>=2.14.0
 python-dotenv>=1.2.0
+pyjwt>=2.10.0               # optional Supabase JWT verification (app/auth.py)
 
 # --- Retrieval agents ---
 tavily-python>=0.7.26      # web search (Search Agent)
@@ -22,6 +23,20 @@ langgraph>=1.2.9
 # --- Local vector store (Phase 2) ---
 faiss-cpu>=1.14.0
 sentence-transformers>=5.6.0    # downloads model weights from huggingface.co on first use
+
+# --- Persistence & migrations (Phase 11) ---
+# SQLAlchemy ships transitively already; alembic drives the schema migrations
+# for the saved library. Postgres in production uses the pg8000 pure-Python
+# driver (no system libpq needed) — set DATABASE_URL=postgresql+pg8000://...
+alembic>=1.13.0
+pg8000>=1.31.0             # pure-Python Postgres driver (only used when DATABASE_URL is Postgres)
+# redis>=5.0.0            # OPTIONAL: only needed when CACHE_BACKEND=redis (e.g. Upstash free tier).
+                          # Lazy-imported in app/cache.py; leave commented for the sqlite/postgres backends.
+
+# --- Error monitoring (Phase 13) ---
+# sentry-sdk>=2.0.0       # OPTIONAL: only needed when SENTRY_DSN is set. Lazy-imported in
+                          # app/main.py; a blank DSN (the default) is a no-op, so the app
+                          # runs fine with this left commented. Sentry has a free tier.
 
 # --- Supplementary retrieval for the Writer (Phase 4) ---
 llama-index-core>=0.14.0

@@ -1,0 +1,1 @@
+only code if i said and dont go outside of the given folder and dont run the full thing if done by you tell me i will see it and run and do with my own but give steps to run it.

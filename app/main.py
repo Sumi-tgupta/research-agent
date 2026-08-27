@@ -19,9 +19,10 @@ Then try:
     curl -N -X POST http://localhost:8000/research/stream -H "Content-Type: application/json" -d '{"query": "impact of microplastics on marine food webs"}'
     curl -X POST http://localhost:8000/research/pdf -o report.pdf -H "Content-Type: application/json" -d '{"query": "impact of microplastics on marine food webs"}'
 
-CORS is wide open (allow_origins=["*"]) since this is a local dev project,
-not a deployed service — tighten this to your actual frontend origin
-before putting it anywhere public.
+CORS is restricted to the origins in ALLOWED_ORIGINS (default: the Next.js
+dev server at http://localhost:3000). Set ALLOWED_ORIGINS="*" for wide-open
+access during local experimentation, or list your real frontend origin(s)
+before deploying anywhere public.
 
 /agents/writer and /agents/reviewer take a plan + verified_claims directly
 (e.g. copy-pasted from a prior /research response) rather than gathering
@@ -29,13 +30,15 @@ their own sources — useful for iterating on prompt/translation behavior
 without re-running the whole (slower, rate-limited) pipeline each time.
 """
 
+import logging
 import os
 import tempfile
+from typing import Literal, Optional
 
-from fastapi import FastAPI
+from fastapi import BackgroundTasks, Depends, FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 
 from app.agents.fact_checker_agent import FactCheckerAgent
 from app.agents.paper_retrieval_agent import PaperRetrievalAgent
@@ -49,8 +52,50 @@ from app.pdf_export import generate_pdf
 from app.schemas import AgentResult, ChartSpec, Document, ResearchPlan, VerifiedClaim
 from app.stream_events import STAGE_LABELS, format_sse_event, serialize, summarize_stage
 from app.embedding_service import get_default_embedder
+from app.auth import AuthUser, get_optional_user
+from app.config import get_settings
+from app.rate_limit import enforce_rate_limit
 
 from app.db.session import init_db
+from app import library_repository as _library_repo
+from app import storage as _storage
+from app.routers.library import router as library_router
+
+def _init_sentry() -> None:
+    """Optionally wire Sentry error monitoring (Phase 13).
+
+    Fully env-driven and best-effort: a blank SENTRY_DSN is a no-op, a missing
+    sentry-sdk just logs a hint, and any init failure is swallowed. Nothing here
+    can break app startup — monitoring is a pure add-on. Runs at import time
+    (before the app is created) so it can also catch import/startup errors.
+    """
+    settings = get_settings()
+    dsn = (settings.sentry_dsn or "").strip()
+    if not dsn:
+        return
+    try:
+        import sentry_sdk
+    except ModuleNotFoundError:
+        logging.getLogger(__name__).warning(
+            "SENTRY_DSN is set but sentry-sdk isn't installed; skipping error "
+            "monitoring. Enable it with: pip install sentry-sdk"
+        )
+        return
+    try:
+        sentry_sdk.init(
+            dsn=dsn,
+            environment=settings.app_env,
+            traces_sample_rate=settings.sentry_traces_sample_rate,
+            send_default_pii=False,  # never ship user PII to the monitor
+        )
+    except Exception:  # pragma: no cover - monitoring must never break boot
+        logging.getLogger(__name__).warning(
+            "Sentry init failed; continuing without error monitoring.",
+            exc_info=True,
+        )
+
+
+_init_sentry()
 
 app = FastAPI(title="Apex-Research Multi-Agent System", description="Phase 0-7 Enterprise Deep Research Platform")
 
@@ -58,12 +103,53 @@ app = FastAPI(title="Apex-Research Multi-Agent System", description="Phase 0-7 E
 def on_startup():
     init_db()
 
+# CORS: allow the configured frontend origins (Next.js dev server on :3000 by
+# default). Set ALLOWED_ORIGINS in the environment to change this — "*" allows
+# any origin, which is fine for local dev but should be tightened for a real
+# deployment. See app/config.py.
+_origins = get_settings().allowed_origins_list
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_origins,
+    # Wildcard origins can't be combined with credentialed requests per the
+    # CORS spec; the frontend doesn't send cookies to this API, so this is safe.
+    allow_credentials=_origins != ["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Baseline security headers on every response (Phase 12). This is a pure JSON /
+# SSE / PDF API that serves no HTML of its own, so a deny-everything CSP and
+# frame policy cost nothing here while still hardening the responses. HSTS is
+# added only in production, since forcing HTTPS on http://localhost during dev
+# would be counterproductive. `setdefault` guarantees we never overwrite a
+# header a response already set (e.g. content-type), so this is safe to run in
+# front of the CORS middleware and the streaming/file responses alike.
+_SECURITY_HEADERS = {
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+    "Cross-Origin-Opener-Policy": "same-origin",
+    "X-XSS-Protection": "0",  # modern browsers: disable the legacy, buggy auditor
+    "Content-Security-Policy": "default-src 'none'; frame-ancestors 'none'; base-uri 'none'",
+    "Permissions-Policy": "geolocation=(), microphone=(), camera=()",
+}
+
+
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    response = await call_next(request)
+    for header, value in _SECURITY_HEADERS.items():
+        response.headers.setdefault(header, value)
+    if get_settings().app_env == "production":
+        response.headers.setdefault(
+            "Strict-Transport-Security", "max-age=63072000; includeSubDomains"
+        )
+    return response
+
+# Saved-library endpoints (Phase 11). These require a signed-in user; anonymous
+# research on the /research* endpoints below is unaffected.
+app.include_router(library_router)
 
 
 class QueryRequest(BaseModel):
@@ -118,12 +204,34 @@ class ReviewerTestResponse(BaseModel):
 
 
 class ResearchRequest(BaseModel):
-    query: str
-    num_sub_questions: int = 4
-    max_results_per_subquestion: int = 5
-    target_language: str = "English"
-    max_revisions: int = DEFAULT_MAX_REVISIONS
-    citation_style: str = "apa"  # "apa" or "mla"
+    """Public entry point for the whole pipeline, so its inputs are validated
+    strictly (Phase 12): every field is bounded, the query can't be blank or
+    unbounded, and citation_style is constrained to the two styles the writer
+    actually supports. Bad input fails fast with a 422 here rather than wasting
+    an LLM/search run — and the upper bounds cap how expensive any single call
+    a caller can request is."""
+
+    query: str = Field(min_length=3, max_length=2000)
+    num_sub_questions: int = Field(default=4, ge=1, le=10)
+    max_results_per_subquestion: int = Field(default=5, ge=1, le=20)
+    target_language: str = Field(default="English", min_length=2, max_length=60)
+    max_revisions: int = Field(default=DEFAULT_MAX_REVISIONS, ge=0, le=5)
+    citation_style: Literal["apa", "mla"] = "apa"
+
+    @field_validator("query", "target_language", mode="before")
+    @classmethod
+    def _strip_text(cls, v):
+        """Trim surrounding whitespace before the length checks run, so a
+        whitespace-only query collapses to "" and is rejected by min_length
+        rather than sneaking past as 3+ spaces."""
+        return v.strip() if isinstance(v, str) else v
+
+    @field_validator("citation_style", mode="before")
+    @classmethod
+    def _normalize_citation_style(cls, v):
+        """Accept "APA"/"Mla"/etc. by normalizing case before the Literal check;
+        anything not apa/mla still fails validation with a clear 422."""
+        return v.lower().strip() if isinstance(v, str) else v
 
 
 class ResearchPipelineResponse(BaseModel):
@@ -140,6 +248,9 @@ class ResearchPipelineResponse(BaseModel):
     final_report: str
     chart_specs: list[ChartSpec]
     errors: list[str]
+    # Set when the request was authenticated and the result was auto-saved to
+    # the caller's library (Phase 11); None for anonymous requests.
+    saved_id: Optional[str] = None
 
 
 @app.get("/health")
@@ -204,7 +315,11 @@ def run_reviewer_agent(req: ReviewerTestRequest) -> ReviewerTestResponse:
 
 
 @app.post("/research/stream")
-def run_research_pipeline_stream(req: ResearchRequest) -> StreamingResponse:
+def run_research_pipeline_stream(
+    req: ResearchRequest,
+    user: Optional[AuthUser] = Depends(get_optional_user),
+    _rate=Depends(enforce_rate_limit),
+) -> StreamingResponse:
     """Same pipeline as /research, but streams one Server-Sent Event per
     pipeline stage as it completes (via graph.stream(), not .invoke()),
     ending with a final event carrying the complete result. This is what
@@ -243,22 +358,49 @@ def run_research_pipeline_stream(req: ResearchRequest) -> StreamingResponse:
             yield format_sse_event({"type": "complete", "result": serialize(_response_dict(req, state))})
             return
 
-        yield format_sse_event({"type": "complete", "result": serialize(_response_dict(req, state))})
+        # Success path: send the result immediately, then (for signed-in
+        # users) persist it. The DB save is fast and its id rides along on the
+        # complete event; the optional file offload runs afterward so it can't
+        # delay what the client sees.
+        final = serialize(_response_dict(req, state))
+        saved_id = _persist_for_user(req, user, final)
+        if saved_id:
+            final["saved_id"] = saved_id
+        yield format_sse_event({"type": "complete", "result": final})
+        if saved_id:
+            _offload_storage_safe(saved_id, final)
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
 @app.post("/research", response_model=ResearchPipelineResponse)
-def run_research_pipeline(req: ResearchRequest) -> ResearchPipelineResponse:
+def run_research_pipeline(
+    req: ResearchRequest,
+    background_tasks: BackgroundTasks,
+    user: Optional[AuthUser] = Depends(get_optional_user),
+    _rate=Depends(enforce_rate_limit),
+) -> ResearchPipelineResponse:
     """Runs the full graph: planner -> search_all -> retrieve_all ->
     dedupe_and_rank -> fact_check -> writer <-> reviewer -> add_citations
-    -> generate_charts. The real pipeline, not a single-agent test."""
+    -> generate_charts. The real pipeline, not a single-agent test.
+
+    For signed-in users the result is auto-saved to their library (best-effort;
+    a save failure never fails the request) and `saved_id` is returned. Any
+    durable file offload runs as a background task after the response is sent."""
     state = _invoke_pipeline(req)
-    return ResearchPipelineResponse(**_response_dict(req, state))
+    result = _response_dict(req, state)
+    serialized = serialize(result)
+    saved_id = _persist_for_user(req, user, serialized)
+    if saved_id:
+        background_tasks.add_task(_offload_storage_safe, saved_id, serialized)
+    return ResearchPipelineResponse(**result, saved_id=saved_id)
 
 
 @app.post("/research/pdf")
-def run_research_pipeline_pdf(req: ResearchRequest) -> FileResponse:
+def run_research_pipeline_pdf(
+    req: ResearchRequest,
+    _rate=Depends(enforce_rate_limit),
+) -> FileResponse:
     """Runs the full pipeline, then renders the result straight to a
     downloadable PDF. If you already have a result (e.g. from /research or
     /research/stream) and just want the PDF, use /reports/pdf instead —
@@ -343,3 +485,108 @@ def _response_dict(req: ResearchRequest, state: dict) -> dict:
         "chart_specs": state.get("chart_specs", []),
         "errors": state.get("errors", []),
     }
+
+
+# --------------------------------------------------------------------------- #
+# Phase 11 — server-side auto-persist for signed-in users
+#
+# Research itself stays anonymous-first: these helpers only do anything when a
+# verified user is present, and they are strictly best-effort — a persistence
+# failure must never turn a successful research run into an error response, so
+# every path swallows its exceptions and simply skips the save. `serialized`
+# is the JSON-safe result dict (post-`serialize`), matching what the frontend
+# receives and what library_repository expects.
+# --------------------------------------------------------------------------- #
+
+def _persist_for_user(
+    req: ResearchRequest, user: Optional[AuthUser], serialized: dict
+) -> Optional[str]:
+    """Save a finished result to the user's library. Returns the new library
+    id, or None (anonymous request, or a swallowed failure). Fast: writes only
+    to the database — durable file offload happens separately, off the critical
+    path (see _offload_storage_safe)."""
+    if user is None:
+        return None
+
+    from app.db.session import SessionLocal
+
+    db = SessionLocal()
+    try:
+        # A run that fell through to the pipeline's top-level failure handler
+        # carries a "Pipeline failed unexpectedly: ..." error; record it as an
+        # "error" job (with the reason) instead of a silent "complete". Partial
+        # content, if any, is still saved so the run stays inspectable.
+        errors = serialized.get("errors") or []
+        fatal = next(
+            (e for e in errors if isinstance(e, str) and e.startswith("Pipeline failed unexpectedly")),
+            None,
+        )
+        session = _library_repo.save_result_for_user(
+            db,
+            user.id,
+            serialized,
+            citation_style=req.citation_style,
+            target_language=req.target_language,
+            num_sub_questions=req.num_sub_questions,
+            max_results_per_subquestion=req.max_results_per_subquestion,
+            status=("error" if fatal else "complete"),
+            error_text=fatal,
+        )
+        return session.id
+    except Exception:
+        db.rollback()
+        return None
+    finally:
+        db.close()
+
+
+def _offload_storage_safe(session_id: str, serialized: dict) -> None:
+    """Best-effort: render the report PDF and chart PNGs and push them to
+    Supabase Storage, recording the signed URLs on the saved rows. No-op unless
+    Storage is configured (SUPABASE_URL + SUPABASE_SERVICE_KEY); disabled by
+    default, so the common path costs nothing. Runs after the response is sent
+    (SSE: after the final yield; blocking: as a BackgroundTask), so the extra
+    render latency never delays the result. Never raises."""
+    try:
+        if not _storage.storage_enabled():
+            return
+
+        from app.db.session import SessionLocal
+
+        db = SessionLocal()
+        try:
+            chart_specs_json = serialized.get("chart_specs") or []
+            chart_image_paths: list[str] = []
+            if chart_specs_json:
+                specs = [ChartSpec(**c) for c in chart_specs_json]
+                chart_dir = tempfile.mkdtemp(prefix="research_charts_")
+                chart_image_paths = render_charts(specs, chart_dir)
+                urls_by_ordinal: dict[int, str] = {}
+                for i, path in enumerate(chart_image_paths):
+                    with open(path, "rb") as fh:
+                        url = _storage.upload_chart_png(session_id, i, fh.read())
+                    if url:
+                        urls_by_ordinal[i] = url
+                if urls_by_ordinal:
+                    _library_repo.set_chart_png_urls(db, session_id, urls_by_ordinal)
+
+            final_report = serialized.get("final_report") or ""
+            if final_report:
+                pdf_dir = tempfile.mkdtemp(prefix="research_report_")
+                pdf_path = os.path.join(pdf_dir, "report.pdf")
+                generate_pdf(
+                    title=serialized.get("query") or "Research report",
+                    report_text=final_report,
+                    output_path=pdf_path,
+                    chart_image_paths=chart_image_paths,
+                )
+                with open(pdf_path, "rb") as fh:
+                    url = _storage.upload_report_pdf(session_id, fh.read())
+                if url:
+                    _library_repo.set_report_pdf_url(db, session_id, url)
+        finally:
+            db.close()
+    except Exception:
+        # Durable offload is a nice-to-have; the DB row already reconstructs the
+        # full report and PDFs re-render on demand via /reports/pdf.
+        return

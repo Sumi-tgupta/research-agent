@@ -11,12 +11,10 @@ claims is genuinely chart-worthy, it returns an empty list; a report with
 no chart is far better than a report with a fabricated one.
 """
 
-from google.genai import types
 from pydantic import BaseModel, Field
 
-from app.config import get_settings
 from app.llm_clients import get_gemini_client
-from app.retry import call_with_backoff, is_retryable_http_error
+from app.model_router import Tier, generate_structured
 from app.schemas import ChartSpec, VerifiedClaim
 
 CHART_EXTRACTION_PROMPT = """You are looking for genuinely chart-worthy numeric comparisons in the verified claims below — for example, different sources reporting different numeric values for the same measure, or a claim listing several related quantities that are naturally compared side by side.
@@ -41,35 +39,26 @@ def _format_claims(verified_claims: list[VerifiedClaim]) -> str:
 
 
 class ChartAgent:
-    def __init__(self):
-        self.settings = get_settings()
-
     def extract(self, verified_claims: list[VerifiedClaim]) -> tuple[list[ChartSpec], list[str]]:
         """Returns (chart_specs, errors). An empty list is a normal,
         expected outcome — most research questions won't have chartable
         numeric comparisons — and it's what's returned whether nothing
         was found or the call itself failed, since there's no reasonable
-        fallback to fabricate for a chart specifically."""
+        fallback to fabricate for a chart specifically. Chart detection is a
+        "light" stage: it prefers Groq's fast model and falls back to Gemini
+        via the model router (see model_router.py)."""
         if not verified_claims:
             return [], []
 
-        client = get_gemini_client()
-        if client is None:
-            return [], ["GEMINI_API_KEY not configured — skipped chart extraction"]
-
+        warnings: list[str] = []
         try:
-            response = call_with_backoff(
-                lambda: client.models.generate_content(
-                    model=self.settings.gemini_model,
-                    contents=CHART_EXTRACTION_PROMPT.format(claims_text=_format_claims(verified_claims)),
-                    config=types.GenerateContentConfig(
-                        response_mime_type="application/json",
-                        response_schema=_ChartExtractionOutput,
-                    ),
-                ),
-                is_retryable=is_retryable_http_error,
+            output = generate_structured(
+                CHART_EXTRACTION_PROMPT.format(claims_text=_format_claims(verified_claims)),
+                tier=Tier.LIGHT,
+                schema=_ChartExtractionOutput,
+                warnings=warnings,
+                gemini_client_factory=get_gemini_client,
             )
-            output = _ChartExtractionOutput.model_validate_json(response.text)
         except Exception as exc:
             return [], [f"Chart extraction failed: {exc}"]
 
@@ -77,4 +66,4 @@ class ChartAgent:
         # and values actually line up — drop anything malformed rather
         # than let a broken spec reach matplotlib.
         valid_charts = [chart for chart in output.charts if chart.labels and len(chart.labels) == len(chart.values)]
-        return valid_charts, []
+        return valid_charts, warnings

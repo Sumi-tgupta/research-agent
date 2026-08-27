@@ -7,10 +7,14 @@ Configures connection pooling and session lifecycle for PostgreSQL / SQLite.
 import os
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session
+from app.config import get_settings
 from app.db.models import Base
 
-# Default to SQLite for local development/testing, PostgreSQL in production
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///.cache/apex_research.db")
+# Single source of truth for the connection string is app/config.py
+# (Settings.database_url), which still honors the DATABASE_URL env var via
+# pydantic-settings. Defaults to SQLite for local dev/testing; point it at
+# Supabase's Postgres in production.
+DATABASE_URL = get_settings().database_url
 
 connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
 

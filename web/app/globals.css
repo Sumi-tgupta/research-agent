@@ -1,0 +1,230 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+  Emerald Horizon design tokens.
+  Dark is the signature theme (deep abyss → viridian, luminous mint horizon).
+  Light ("misted dawn") tones the identity down to protect readability.
+  Values are HSL triplets so Tailwind's hsl(var(--x) / <alpha>) works.
+*/
+@layer base {
+  :root {
+    /* Light — "misted dawn" */
+    --background: 150 30% 96%;
+    --foreground: 161 45% 12%;
+    --card: 150 30% 99%;
+    --card-foreground: 161 45% 12%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 161 45% 12%;
+    --primary: 159 67% 30%;
+    --primary-foreground: 150 40% 98%;
+    --secondary: 150 20% 90%;
+    --secondary-foreground: 161 45% 16%;
+    --muted: 150 18% 92%;
+    --muted-foreground: 156 10% 38%;
+    --accent: 173 45% 38%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 70% 45%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 150 15% 85%;
+    --input: 150 15% 82%;
+    --ring: 159 67% 40%;
+
+    --champagne: 38 55% 42%;
+    --horizon-glow: 168 45% 38%;
+    --viridian: 159 67% 30%;
+    --aurora: 173 45% 40%;
+
+    --radius: 0.75rem;
+  }
+
+  .dark {
+    /* Dark — "Emerald Horizon" */
+    --background: 160 55% 4%;
+    --foreground: 150 26% 92%;
+    --card: 161 42% 8%;
+    --card-foreground: 150 26% 92%;
+    --popover: 162 45% 6%;
+    --popover-foreground: 150 26% 92%;
+    --primary: 159 66% 40%;
+    --primary-foreground: 155 45% 96%;
+    --secondary: 166 24% 14%;
+    --secondary-foreground: 150 26% 90%;
+    --muted: 165 22% 12%;
+    --muted-foreground: 153 13% 64%;
+    --accent: 173 50% 46%;
+    --accent-foreground: 160 55% 6%;
+    --destructive: 0 60% 48%;
+    --destructive-foreground: 150 40% 96%;
+    --border: 165 24% 15%;
+    --input: 165 24% 17%;
+    --ring: 159 66% 48%;
+
+    --champagne: 43 62% 77%;
+    --horizon-glow: 157 76% 75%;
+    --viridian: 159 66% 40%;
+    --aurora: 173 53% 55%;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    /* keep content above the fixed WebGL background */
+    position: relative;
+  }
+
+  ::selection {
+    background: hsl(var(--champagne) / 0.3);
+    color: hsl(var(--foreground));
+  }
+
+  /* Subtle, on-theme scrollbars */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--border)) transparent;
+  }
+  *::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  *::-webkit-scrollbar-thumb {
+    background: hsl(var(--border));
+    border-radius: 9999px;
+    border: 3px solid transparent;
+    background-clip: content-box;
+  }
+  *::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--muted-foreground) / 0.5);
+    background-clip: content-box;
+  }
+}
+
+@layer utilities {
+  /* Frosted reading surface that lets the horizon glow through at the edges */
+  .glass {
+    background: hsl(var(--card) / 0.62);
+    -webkit-backdrop-filter: blur(16px) saturate(140%);
+    backdrop-filter: blur(16px) saturate(140%);
+    border: 1px solid hsl(var(--border) / 0.7);
+  }
+  .glass-strong {
+    background: hsl(var(--card) / 0.82);
+    -webkit-backdrop-filter: blur(22px) saturate(150%);
+    backdrop-filter: blur(22px) saturate(150%);
+    border: 1px solid hsl(var(--border) / 0.8);
+  }
+  .text-balance {
+    text-wrap: balance;
+  }
+
+  /* Static gradient used as the canvas placeholder AND the reduced-motion /
+     no-WebGL fallback for the Emerald Horizon background. */
+  .emerald-horizon-fallback {
+    background:
+      radial-gradient(120% 80% at 50% 100%, hsl(165 45% 55% / 0.16), transparent 62%),
+      linear-gradient(180deg, hsl(150 30% 97%) 0%, hsl(150 26% 92%) 100%);
+  }
+  .dark .emerald-horizon-fallback {
+    background:
+      radial-gradient(120% 82% at 50% 102%, hsl(157 76% 70% / 0.12), transparent 60%),
+      radial-gradient(70% 55% at 50% 96%, hsl(173 60% 50% / 0.16), transparent 55%),
+      linear-gradient(180deg, hsl(160 55% 3%) 0%, hsl(162 48% 6%) 55%, hsl(159 55% 9%) 100%);
+  }
+}
+
+/* Reading typography for the rendered report (no @tailwindcss/typography dep). */
+@layer components {
+  /* Keyboard-only skip link: off-screen until focused, then slides into view. */
+  .skip-link {
+    position: absolute;
+    left: 0.75rem;
+    top: 0.75rem;
+    z-index: 100;
+    transform: translateY(-150%);
+    border-radius: 0.5rem;
+    background: hsl(var(--primary));
+    padding: 0.5rem 0.875rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: hsl(var(--primary-foreground));
+    transition: transform 0.15s ease;
+  }
+  .skip-link:focus {
+    transform: translateY(0);
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: 2px;
+  }
+
+  .report-prose {
+    @apply font-serif text-[1.02rem] leading-[1.75] text-foreground/90;
+  }
+  .report-prose > * + * {
+    @apply mt-4;
+  }
+  .report-prose h1 {
+    @apply font-display text-3xl font-semibold tracking-tight text-foreground mt-8 mb-2;
+  }
+  .report-prose h2 {
+    @apply font-display text-2xl font-semibold tracking-tight text-foreground mt-8 mb-1;
+  }
+  .report-prose h3 {
+    @apply font-display text-xl font-semibold text-foreground mt-6 mb-1;
+  }
+  .report-prose p {
+    @apply text-foreground/90;
+  }
+  .report-prose ul {
+    @apply list-disc pl-6 space-y-1.5 marker:text-accent;
+  }
+  .report-prose ol {
+    @apply list-decimal pl-6 space-y-1.5 marker:text-muted-foreground;
+  }
+  .report-prose a {
+    @apply text-accent underline underline-offset-4 decoration-accent/40 hover:decoration-accent transition-colors;
+  }
+  .report-prose blockquote {
+    @apply border-l-2 border-accent/50 pl-4 italic text-foreground/80;
+  }
+  .report-prose code {
+    @apply font-mono text-[0.85em] rounded bg-muted px-1.5 py-0.5 text-foreground;
+  }
+  .report-prose pre {
+    @apply font-mono rounded-lg bg-muted p-4 overflow-x-auto text-sm;
+  }
+  .report-prose pre code {
+    @apply bg-transparent p-0;
+  }
+  .report-prose hr {
+    @apply my-8 border-border;
+  }
+  .report-prose strong {
+    @apply font-semibold text-foreground;
+  }
+  .report-prose table {
+    @apply w-full text-sm border-collapse my-4;
+  }
+  .report-prose th,
+  .report-prose td {
+    @apply border border-border px-3 py-2 text-left;
+  }
+}
+
+/* Honor reduced-motion everywhere. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}

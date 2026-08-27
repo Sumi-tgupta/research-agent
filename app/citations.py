@@ -79,10 +79,17 @@ def _domain_from_url(url: str) -> str:
 
 
 def _source_display_name(doc: Document) -> str:
-    if doc.source == SourceType.ARXIV:
-        return "arXiv"
-    if doc.source == SourceType.SEMANTIC_SCHOLAR:
-        return "Semantic Scholar"
+    display = {
+        SourceType.ARXIV: "arXiv",
+        SourceType.SEMANTIC_SCHOLAR: "Semantic Scholar",
+        SourceType.OPENALEX: "OpenAlex",
+        SourceType.PUBMED: "PubMed",
+        SourceType.CROSSREF: "Crossref",
+        SourceType.WIKIPEDIA: "Wikipedia",
+    }.get(doc.source)
+    if display:
+        return display
+    # WEB (and any future type) falls back to the human-readable domain.
     return _domain_from_url(doc.url) or "Web"
 
 
